@@ -47,7 +47,10 @@ def main():
     tundev = make_tun()
     tunfd = tundev.fileno()
     logger.info(u'TUN dev OK')
+    time.sleep(1)
     subprocess.check_call('ifconfig tun0 192.168.10.2/24 up', shell=True)
+    subprocess.check_call('route add -net 192.168.0.1/24 gw 192.168.10.1 tun0',
+                          shell=True)
     time.sleep(1)
 
     sock = socket.socket()

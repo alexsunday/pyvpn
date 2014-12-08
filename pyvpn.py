@@ -1,21 +1,14 @@
 #!/usr/bin/env python
 # encoding: utf-8
-'''
-Created on 2014年12月6日
-
-@author: Sunday
-server:
-eth0: 192.168.0.192/24, listen on eth0 23456, communication with tcp
-tun0: 192.168.10.1/24
-'''
-import fcntl  # @UnresolvedImport
+import os
+import time
 import socket
 import select
-import os
 import logging
 import struct
 import subprocess
-import time
+import fcntl  # @UnresolvedImport
+import sys
 logger = logging.getLogger('vpn')
 logger.addHandler(logging.StreamHandler())
 logger.setLevel(logging.DEBUG)
@@ -23,21 +16,45 @@ logger.setLevel(logging.DEBUG)
 
 def make_tun():
     TUNSETIFF = 0x400454ca
-    TUNSETOWNER = TUNSETIFF + 2
     IFF_TUN = 0x0001
     IFF_NO_PI = 0x1000
-
-    # Open TUN device file.
     tun = open('/dev/net/tun', 'r+b')
-    # Tall it we want a TUN device named tun0.
     ifr = struct.pack('16sH', 'tun%d', IFF_TUN | IFF_NO_PI)
     fcntl.ioctl(tun, TUNSETIFF, ifr)
-    # Optionally, we want it be accessed by the normal user.
-    fcntl.ioctl(tun, TUNSETOWNER, 1000)
     return tun
 
 
-def main():
+def client():
+    tundev = make_tun()
+    tunfd = tundev.fileno()
+    logger.info(u'TUN dev OK')
+    time.sleep(1)
+    subprocess.check_call('ifconfig tun0 192.168.10.2/24 up', shell=True)
+    subprocess.check_call('route add -net 192.168.0.1/24 gw 192.168.10.1 tun0',
+                          shell=True)
+    time.sleep(1)
+
+    sock = socket.socket()
+    addr = ('heruilong1988.oicp.net', 23456)
+    sock.connect(addr)
+    logger.info(u'SOCK dev conn OK')
+    sock.setblocking(False)
+    sockfd = sock.fileno()
+
+    buflen = 65536
+    fds = [tunfd, sockfd, ]
+    while True:
+        rs, _, _ = select.select(fds, [], [], 0.1)
+        for fd in rs:
+            if fd == tunfd:
+                logger.info('TUN recv DATA')
+                os.write(sockfd, os.read(tunfd, buflen))
+            elif fd == sockfd:
+                logger.info(u'SOCK recv DATA')
+                os.write(tunfd, os.read(sockfd, buflen))
+
+
+def server():
     buflen = 65536
     tundev = make_tun()
     tunfd = tundev.fileno()
@@ -64,7 +81,6 @@ def main():
             elif fd == tunfd:
                 logger.info(u'TUN dev recv DATA, rs:[%r]' % rs)
                 for client_fd in fds:
-                    print client_fd, fds
                     if client_fd not in [tunfd, sockfd]:
                         os.write(client_fd, os.read(tunfd, buflen))
             else:
@@ -73,4 +89,9 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    if sys.argv[1] == '-s':
+        sys.exit(server())
+    elif sys.argv[1] == '-c':
+        sys.exit(client())
+    else:
+        print u'Usage: pyvpn [-s] [-c]'

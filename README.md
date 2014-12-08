@@ -29,3 +29,12 @@ fcntl.ioctl(tun, TUNSETIFF, ifr)
 fcntl.ioctl(tun, TUNSETOWNER, 1000)
 print ifr
 return tun.fileno()
+
+
+Usage:
+vpn -s 192.168.10.1 255.255.255.0
+
+vpn -c 192.168.10.0 255.255.255.0 office.server.org 23456
+
+
+还可以做一个魔兽监听工具。
