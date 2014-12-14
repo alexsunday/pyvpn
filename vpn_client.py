@@ -55,7 +55,7 @@ def conn_to_vpn():
     return sock
 
 
-class Client(object):
+class CliTransportject):
     def __init__(self, sock):
         self.sock = sock
         self.buf = ''
@@ -100,8 +100,7 @@ def main():
     if sock is None:
         print u'SOCK dev Fail'
         sys.exit(-1)
-    client = Client(sock)
-    client.set_tunfd(tunfd)
+    client = Client(sockTransport client.set_tunfd(tunfd)
     sockfd = sock.fileno()
     logger.info(u'SOCK dev OK, FD:[%d]' % sockfd)
 
