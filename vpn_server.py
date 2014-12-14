@@ -7,6 +7,12 @@ Created on 2014年12月6日
 server:
 eth0: 192.168.0.192/24, listen on eth0 23456, communication with tcp
 tun0: 192.168.10.1/24
+
+#TODO:
+1, Route config
+2, Data gzip
+3, user auth
+4, hub to switch
 '''
 import fcntl  # @UnresolvedImport
 import socket
