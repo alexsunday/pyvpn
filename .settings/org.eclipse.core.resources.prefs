@@ -1,7 +1,5 @@
 eclipse.preferences.version=1
 encoding/pyvpn.py=utf-8
-encoding/sshpassguess.py=utf-8
+encoding/tuntest.py=utf-8
 encoding/utils.py=utf-8
 encoding/vpn_client.py=utf-8
-encoding/vpn_server.py=utf-8
-encoding/worker.py=utf-8
