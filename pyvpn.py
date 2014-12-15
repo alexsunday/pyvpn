@@ -14,6 +14,14 @@ tun0: 192.168.10.1/24
 3, user auth
 4, hub to switch
 5, select to epoll
+
+protocol: 
+----------------------------
+| | 
+----------------------------
+header, body
+1 byte, 4 byte, var byte
+data, push-ip, push-route, require-auth, auth-res
 '''
 import fcntl  # @UnresolvedImport
 import socket
@@ -77,6 +85,7 @@ def make_tun():
     return dev, tun
 
 
+@exp_none
 def ifconfig(dev, ipaddr, netmask):
     # http://stackoverflow.com/questions/6652384/how-to-set-the-ip-address-from-c-in-linux
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_IP)
@@ -108,9 +117,9 @@ def add_route(dev, mask, next_gw):
     pass
 
 
-def conn_to_vpn():
+def conn_to_vpn(addr, port):
     sock = socket.socket()
-    addr = ('heruilong1988.oicp.net', 23456)
+    addr = (addr, port)
     try:
         sock.connect(addr)
     except socket.error as e:
@@ -163,12 +172,16 @@ def client_main(ip, netmask, host, port):
     tunfd = tundev.fileno()
     logger.info(u'TUN dev OK, FD:[%d]' % tunfd)
     time.sleep(1)
-    subprocess.check_call('ifconfig tun0 192.168.10.2/24 up', shell=True)
+    # subprocess.check_call('ifconfig tun0 192.168.10.2/24 up', shell=True)
+    iret = ifconfig(dev, ip, netmask)
+    if iret is None:
+        logger.info(u'ip config %s error' % dev)
+        return sys.exit(1)
     subprocess.check_call('route add -net 192.168.0.0/24 gw 192.168.10.1 tun0',
                           shell=True)
     time.sleep(1)
 
-    sock = conn_to_vpn()
+    sock = conn_to_vpn(host, port)
     if sock is None:
         print u'SOCK dev Fail'
         sys.exit(-1)
