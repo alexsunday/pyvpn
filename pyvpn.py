@@ -9,15 +9,15 @@ eth0: 192.168.0.192/24, listen on eth0 23456, communication with tcp
 tun0: 192.168.10.1/24
 
 #TODO:
-1, Route config
 2, Data gzip
 3, user auth
 4, hub to switch
 5, select to epoll
+6, test global route
 
-protocol: 
+protocol:
 ----------------------------
-| | 
+| |
 ----------------------------
 header, body
 1 byte, 4 byte, var byte
@@ -29,7 +29,6 @@ import select
 import os
 import logging
 import struct
-import subprocess
 import time
 import sys
 import argparse
@@ -38,6 +37,8 @@ logger.addHandler(logging.StreamHandler())
 logger.setLevel(logging.DEBUG)
 PYVPN_VERSION = '0.1'
 
+# find const values
+# grep IFF_UP -rl /usr/include/
 IFF_UP = 0x1
 IFF_RUNNING = 0x40
 IFNAMSIZ = 16
@@ -46,6 +47,11 @@ SIOCSIFNETMASK = 0x891c
 SIOCGIFFLAGS = 0x8913
 SIOCSIFFLAGS = 0x8914
 SIOCADDRT = 0x890B
+
+RTF_UP = 0x0001
+RTF_GATEWAY = 0x0002
+
+AF_INET = socket.AF_INET
 
 
 def to_int(s):
@@ -111,10 +117,24 @@ def ifconfig(dev, ipaddr, netmask):
     return 0
 
 
-def add_route(dev, mask, next_gw):
-    # sudo strace route add -net 192.168.0.0/24 gw 192.168.10.1 tun0
+@exp_none
+def add_route(dest, mask, gw):
+    # sudo strace route add -net 192.168.0.0/24 gw 192.168.10.1
     # ioctl(3, SIOCADDRT, ifr)
-    pass
+    # /usr/include/net/route.h
+    pad = '\x00' * 8
+    inet_aton = socket.inet_aton
+    sockaddr_in_fmt = 'hH4s8s'
+    rtentry_fmt = 'L16s16s16sH38s'
+    dst = struct.pack(sockaddr_in_fmt, AF_INET, 0, inet_aton(dest), pad)
+    next_gw = struct.pack(sockaddr_in_fmt, AF_INET, 0, inet_aton(gw), pad)
+    netmask = struct.pack(sockaddr_in_fmt, AF_INET, 0, inet_aton(mask), pad)
+    rt_flags = RTF_UP | RTF_GATEWAY
+    rtentry = struct.pack(rtentry_fmt,
+                          0, dst, next_gw, netmask, rt_flags, '\x00' * 38)
+    sock = socket.socket(AF_INET, socket.SOCK_DGRAM, 0)
+    fcntl.ioctl(sock.fileno(), SIOCADDRT, rtentry)
+    return 0
 
 
 def conn_to_vpn(addr, port):
@@ -172,16 +192,17 @@ def client_main(ip, netmask, host, port):
     tunfd = tundev.fileno()
     logger.info(u'TUN dev OK, FD:[%d]' % tunfd)
     time.sleep(1)
-    # subprocess.check_call('ifconfig tun0 192.168.10.2/24 up', shell=True)
     iret = ifconfig(dev, ip, netmask)
     if iret is None:
         logger.info(u'ip config %s error' % dev)
         return sys.exit(1)
-    subprocess.check_call('route add -net 192.168.0.0/24 gw 192.168.10.1 tun0',
-                          shell=True)
+    iret = add_route('192.168.0.0', '255.255.255.0', '192.168.10.1')
+    if iret is None:
+        logger.info(u'route config %s error' % dev)
+        return sys.exit(1)
     time.sleep(1)
 
-    sock = conn_to_vpn(host, port)
+    sock = conn_to_vpn(host, int(port))
     if sock is None:
         print u'SOCK dev Fail'
         sys.exit(-1)
@@ -192,7 +213,7 @@ def client_main(ip, netmask, host, port):
 
     fds = [tunfd, sockfd, ]
     while True:
-        rs, _, _ = select.select(fds, [], [], 0.1)
+        rs, _, _ = select.select(fds, [], [])
         for fd in rs:
             if fd == tunfd:
                 rcv = os.read(tunfd, buflen)
@@ -214,14 +235,14 @@ def client_main(ip, netmask, host, port):
 def server_main(gwip, netmask, lip, lport):
     buflen = 65536
     dev, tundev = make_tun()
+    print 'Allocated %s' % dev
     tunfd = tundev.fileno()
     logger.info(u'TUN dev OK')
-    subprocess.check_call('ifconfig tun0 192.168.10.1/24 up', shell=True)
-    time.sleep(1)
+    ifconfig(dev, gwip, netmask)
     enable_tcp_forward()
 
     sock = socket.socket()
-    laddr = ('192.168.0.192', 23456)
+    laddr = (lip, int(lport))
     sock.bind(laddr)
     sock.listen(socket.SOMAXCONN)
     logger.info(u'Sock Listen OK')
@@ -232,7 +253,7 @@ def server_main(gwip, netmask, lip, lport):
     fds = [tunfd, sockfd, ]
     while True:
         try:
-            rs, _, _ = select.select(fds, [], [], 0.1)
+            rs, _, _ = select.select(fds, [], [])
         except select.error as e:
             print e
             sys.exit(-1)
@@ -279,10 +300,6 @@ def main():
             ns.client and (ns.server or ns.listen) or
             ns.remote and (ns.server or ns.listen)):
         print u'logistic error, client cannot running with server'
-        parser.print_usage()
-        sys.exit(1)
-    if (not (ns.server and ns.listen) or
-            (not (ns.client and ns.remote))):
         parser.print_usage()
         sys.exit(1)
     if ns.server:
