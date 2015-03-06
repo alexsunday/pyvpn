@@ -14,6 +14,7 @@ tun0: 192.168.10.1/24
 4, hub to switch
 5, select to epoll
 6, test global route
+7, traffic counting
 
 protocol:
 ----------------------------
