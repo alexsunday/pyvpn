@@ -125,5 +125,21 @@ def enable_tcp_forward():
         f1.write('1')
 
 
+class PackageType(object):
+    AUTH = 0
+    HEARTBEAT = 1
+    IFCONFIG = 2
+    DATA = 3
+
+
+class User(object):
+    def __init__(self):
+        self.flow_count = 0
+        self.addr = ''
+
+
+gl_userlist = {}
+
 __all__ = ['to_int', 'exp_none', 'make_tun',
-           'ifconfig', 'add_route', 'enable_tcp_forward']
+           'ifconfig', 'add_route', 'enable_tcp_forward',
+           'PackageType', 'User', 'gl_userlist']

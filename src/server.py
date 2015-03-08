@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # encoding: utf-8
 '''
 Created on 2015年3月7日
@@ -62,12 +63,6 @@ class TunProtocol(protocol.Protocol):
         pass
 
 
-class PackageType(object):
-    AUTH = 0
-    HEARTBEAT = 1
-    IFCONFIG = 2
-
-
 class VPNProtocol(protocol.Protocol, TimeoutMixin):
     def connectionMade(self):
         self._is_authed = False
@@ -78,6 +73,7 @@ class VPNProtocol(protocol.Protocol, TimeoutMixin):
         self._client_mask = None
         self._flow_count = 0
         self.buf = ''
+        self._user = ''
         self.setTimeout(self._interval)
 
     def connectionLost(self, reason):
@@ -93,7 +89,29 @@ class VPNProtocol(protocol.Protocol, TimeoutMixin):
         self.buf = self.buf[d_length:]
         return pack
 
-    def user_auth(self, user, pwd):
+    def user_auth(self, pack):
+        user_len = struct.unpack('@b', pack[3])[0]
+        assert user_len
+        user = pack[4: 4 + user_len]
+        pwd_len = struct.unpack('@b', pack[4 + user_len])[0]
+        assert pwd_len
+        pwd = pack[4 + user_len + 1:]
+        assert user and pwd
+        retpack = struct.pack('@Hbb', 4, 0, 0)
+        self.transport.write(retpack)
+        self._is_authed = True
+        self._user = user
+        return True
+
+    def heartbeat(self):
+        assert self._is_authed
+        retpack = struct.pack('@Hb', 3, 1)
+        self.transport.write(retpack)
+
+    def peer_ifconfig(self):
+        assert self._is_authed
+
+    def trans_data(self):
         pass
 
     def dataReceived(self, data):
@@ -105,16 +123,14 @@ class VPNProtocol(protocol.Protocol, TimeoutMixin):
             if not pack:
                 break
             pack_type = struct.unpack('@b', pack[2])[0]
-            if pack_type == PackageType.AUTH:
-                user_len = struct.unpack('@b', pack[3])[0]
-                assert user_len
-                user = pack[4: 4 + user_len]
-                pwd_len = struct.unpack('@b', pack[4 + user_len])[0]
-                assert pwd_len
-                pwd = pack[4 + user_len + 1:]
-                self.user_auth(user, pwd)
-            elif pack_type == PackageType.HEARTBEAT:
-                pass
+            if pack_type == util.PackageType.AUTH:
+                self.user_auth(pack)
+            elif pack_type == util.PackageType.HEARTBEAT:
+                self.heartbeat()
+            elif pack_type == util.PackageType.IFCONFIG:
+                self.peer_ifconfig()
+            elif pack_type == util.PackageType.DATA:
+                self.trans_data()
 
 
 def main():
