@@ -40,16 +40,18 @@ if __name__ == '__main__':
     guid = guid[1]
     handle = win32file.CreateFile(r'\\.\Global\%s.tap' % guid,
                                   win32file.GENERIC_READ | win32file.GENERIC_WRITE,
-                                  win32file.FILE_SHARE_READ | win32file.FILE_SHARE_WRITE,
+                                  0, #win32file.FILE_SHARE_READ | win32file.FILE_SHARE_WRITE,
                                   None, win32file.OPEN_EXISTING,
-                                  win32file.FILE_ATTRIBUTE_SYSTEM, # | win32file.FILE_FLAG_OVERLAPPED,
+                                  win32file.FILE_ATTRIBUTE_SYSTEM | win32file.FILE_FLAG_OVERLAPPED,
                                   None)
     print(handle.handle)
     if False:
         win32file.DeviceIoControl(handle, TAP_IOCTL_CONFIG_POINT_TO_POINT,
                                   '\xc0\xa8\x11\x01\xc0\xa8\x11\x10', None);
     else:
-        win32file.DeviceIoControl(handle, TAP_IOCTL_SET_MEDIA_STATUS, '\x01\x00\x00\x00', None)
+        from IPython import embed
+        embed()
+        # win32file.DeviceIoControl(handle, TAP_IOCTL_SET_MEDIA_STATUS, '\x01\x00\x00\x00', None)
         win32file.DeviceIoControl(handle, TAP_IOCTL_CONFIG_TUN,
                                   '\x0a\x03\x00\x01\x0a\x03\x00\x00\xff\xff\xff\x00', None)
     while True:

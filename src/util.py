@@ -1,21 +1,25 @@
-#!/usr/bin/env python
 # encoding: utf-8
 '''
-Created on 2014年12月14日
+Created on 2015年3月7日
 
 @author: Sunday
 '''
 import fcntl  # @UnresolvedImport
+import socket
+import select
+import os
 import logging
 import struct
-import os
-import socket
-from IPython import embed
+import time
+import sys
+import argparse
 logger = logging.getLogger('vpn')
 logger.addHandler(logging.StreamHandler())
 logger.setLevel(logging.DEBUG)
 PYVPN_VERSION = '0.1'
 
+# find const values
+# grep IFF_UP -rl /usr/include/
 IFF_UP = 0x1
 IFF_RUNNING = 0x40
 IFNAMSIZ = 16
@@ -24,12 +28,51 @@ SIOCSIFNETMASK = 0x891c
 SIOCGIFFLAGS = 0x8913
 SIOCSIFFLAGS = 0x8914
 SIOCADDRT = 0x890B
+
 RTF_UP = 0x0001
 RTF_GATEWAY = 0x0002
 
 AF_INET = socket.AF_INET
 
 
+def to_int(s):
+    try:
+        return int(s)
+    except ValueError as _unused:
+        return None
+
+
+class exp_none(object):
+    def __init__(self, fn):
+        self.fn = fn
+
+    def __call__(self, *args, **kwargs):
+        try:
+            return self.fn(*args, **kwargs)
+        except Exception as e:
+            logger.warn(e)
+            return None
+
+
+def make_tun():
+    TUNSETIFF = 0x400454ca
+    TUNSETOWNER = TUNSETIFF + 2
+    IFF_TUN = 0x0001
+    IFF_NO_PI = 0x1000
+
+    # Open TUN device file.
+    tun = open('/dev/net/tun', 'r+b')
+    # Tall it we want a TUN device named tun0.
+    ifr = struct.pack('16sH', 'tun%d', IFF_TUN | IFF_NO_PI)
+    ret = fcntl.ioctl(tun, TUNSETIFF, ifr)
+    dev, _ = struct.unpack('16sH', ret)
+    dev = dev.strip()
+    # Optionally, we want it be accessed by the normal user.
+    fcntl.ioctl(tun, TUNSETOWNER, 1000)
+    return dev, tun
+
+
+@exp_none
 def ifconfig(dev, ipaddr, netmask):
     # http://stackoverflow.com/questions/6652384/how-to-set-the-ip-address-from-c-in-linux
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_IP)
@@ -55,52 +98,9 @@ def ifconfig(dev, ipaddr, netmask):
     return 0
 
 
-def make_tun():
-    TUNSETIFF = 0x400454ca
-    TUNSETOWNER = TUNSETIFF + 2
-    IFF_TUN = 0x0001
-    IFF_NO_PI = 0x1000
-
-    # Open TUN device file.
-    tun = open('/dev/net/tun', 'r+b')
-    # Tall it we want a TUN device named tun0.
-    ifr = struct.pack('16sH', 'tun%d', IFF_TUN | IFF_NO_PI)
-    ret = fcntl.ioctl(tun, TUNSETIFF, ifr)
-    dev, _ = struct.unpack('16sH', ret)
-    dev = dev.strip()
-    # Optionally, we want it be accessed by the normal user.
-    fcntl.ioctl(tun, TUNSETOWNER, 1000)
-    return dev, tun
-
-
-def show_buf(buf):
-    for pos, word in enumerate(buf):
-        if pos and (pos % 16 == 0):
-            print ''
-        print '%02X' % ord(word),
-    print ''
-
-
-class Transport(object):
-    pass
-
-
-class Waiter(object):
-    def __init__(self):
-        pass
-
-    def serve(self):
-        pass
-
-    def add(self):
-        pass
-
-    def remove(self):
-        pass
-
-
-def add_route(dev, dest, mask, gw):
-    # sudo strace route add -net 192.168.0.0/24 gw 192.168.10.1 tun0
+@exp_none
+def add_route(dest, mask, gw):
+    # sudo strace route add -net 192.168.0.0/24 gw 192.168.10.1
     # ioctl(3, SIOCADDRT, ifr)
     # /usr/include/net/route.h
     pad = '\x00' * 8
@@ -118,27 +118,28 @@ def add_route(dev, dest, mask, gw):
     return 0
 
 
-class SelectWait(Waiter):
-    pass
+def enable_tcp_forward():
+    logger.info(u'Set ip_forward=1')
+    with open('/proc/sys/net/ipv4/ip_forward', 'wb+') as f1:
+        f1.seek(0)
+        f1.write('1')
 
 
-class EPollWait(Waiter):
-    pass
+class PackageType(object):
+    AUTH = 0
+    HEARTBEAT = 1
+    IFCONFIG = 2
+    DATA = 3
 
 
-def main():
-    embed()
-    dev, tun = make_tun()
-    tunfd = tun.fileno()
-    print 'Allocated ', dev
-    ifconfig(dev, '192.168.10.2', '255.255.255.0')
-    embed()
-    while True:
-        rcv = os.read(tunfd, 65535)
-        print '***********************************************'
-        show_buf(rcv)
-        os.write(tunfd, rcv)
+class User(object):
+    def __init__(self):
+        self.flow_count = 0
+        self.addr = ''
 
 
-if __name__ == '__main__':
-    main()
+gl_userlist = {}
+
+__all__ = ['to_int', 'exp_none', 'make_tun',
+           'ifconfig', 'add_route', 'enable_tcp_forward',
+           'PackageType', 'User', 'gl_userlist']

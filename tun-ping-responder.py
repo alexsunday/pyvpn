@@ -102,7 +102,7 @@ def openTunTap():
     win32file.DeviceIoControl(
         tuntap,
         TAP_IOCTL_SET_MEDIA_STATUS,
-        '\x01\x00\x00\x00',
+        '\x00\x00\x00\x00',
         None
     )
     
