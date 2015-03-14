@@ -14,28 +14,47 @@ import util
 from twisted.protocols.policies import TimeoutMixin
 import struct
 from twisted.internet.protocol import Factory
-from src.util import is_valid_netmask, is_valid_ip, inet_atol
+from util import is_valid_netmask, is_valid_ip, inet_atol
 logger = logging.getLogger("pyvpn")
+
+
+class AppException(Exception):
+    pass
+
+
+class TundevException(AppException):
+    pass
+
+
+class IpFullException(TundevException):
+    pass
 
 
 class TunDevice(FileDescriptor, object):
     def __init__(self, protocol, reactor=None):
         FileDescriptor.__init__(self, reactor=reactor)
-        self.dev, _tun = util.make_tun()
-        self.tun = _tun.fileno()
-        fdesc.setNonBlocking(self.tun)
+        self.dev, self._tun = util.make_tun()
+        self.tunfd = self._tun.fileno()
+        fdesc.setNonBlocking(self.tunfd)
         self.protocol = protocol
-        self.protocol.dev, self.protocol.tun = self.dev, self.tun
+        self.protocol.dev, self.protocol.tun = self.dev, self.tunfd
         self.protocol.connectionMade()
 
     def get_free_addr(self):
+        addr = self._netaddr
         while True:
-            addr = self._netaddr + 1
+            addr = addr + 1
             if addr == self._gwaddr:
                 continue
+            if addr in self.allocated_addr:
+                continue
             if addr >= self._boardcast:
-                return None
-            return addr
+                raise IpFullException("IP分配已满")
+            self.allocated_addr.append(addr)
+            return addr, inet_atol(self.netmask)
+
+    def remove_addr(self, addr):
+        self.allocated_addr.remove(addr)
 
     def ifconfig(self, gwaddr, netmask):
         assert is_valid_ip(gwaddr)
@@ -50,23 +69,23 @@ class TunDevice(FileDescriptor, object):
         util.ifconfig(self.dev, gwaddr, netmask)
 
     def fileno(self):
-        return self.tun
+        return self.tunfd
 
     def _doRead(self, in_):
         self.protocol.dataReceived(in_)
 
     def doRead(self):
         print '~~~~~~~~~~~~~~~~~~~~~~~~~'
-        fdesc.readFromFD(self.tun, self._doRead)
+        fdesc.readFromFD(self.tunfd, self._doRead)
         print '~~~~~~~~~~~~~~~~~~~~~~~~~'
 
     def writeSomeData(self, data):
-        fdesc.writeToFD(self.tun, data)
+        fdesc.writeToFD(self.tunfd, data)
 
     def connectionLost(self, reason):
-        if self.tun >= 0:
+        if self.tunfd >= 0:
             try:
-                os.close(self.tun)
+                os.close(self.tunfd)
             except OSError as _:
                 logger.error("cannot close tunfd")
         FileDescriptor.connectionLost(self, reason)
@@ -84,9 +103,6 @@ class TunProtocol(protocol.Protocol):
 
 
 class VPNProtocol(protocol.Protocol, TimeoutMixin):
-    def __init__(self, tundev):
-        self.tundev = tundev
-
     def connectionMade(self):
         self._is_authed = False
         self._is_gzip = True
@@ -97,10 +113,17 @@ class VPNProtocol(protocol.Protocol, TimeoutMixin):
         self._flow_count = 0
         self.buf = ''
         self._user = ''
+        self._addr, self._netmask = None, None
         self.setTimeout(self._interval)
 
     def connectionLost(self, reason):
+        '''
+        @summary: 释放超时信号，释放已分配IP，写入流量等数据
+        :param reason:
+        '''
         self.setTimeout(None)
+        if self._addr:
+            self.tundev.remove_addr(self._addr)
 
     def getpackage(self):
         if len(self.buf) <= 2:
@@ -133,6 +156,10 @@ class VPNProtocol(protocol.Protocol, TimeoutMixin):
 
     def peer_ifconfig(self):
         assert self._is_authed
+        self._addr, self._netmask = self.tundev.get_free_addr()
+        # 返回类型2， ip与掩码各4字节，总长度11字节
+        retpack = struct.pack('@HbII', 11, 2, self._addr, self._netmask)
+        self.transport.write(retpack)
 
     def trans_data(self):
         assert self._is_authed
@@ -156,15 +183,29 @@ class VPNProtocol(protocol.Protocol, TimeoutMixin):
                 self.trans_data()
 
 
+class VPNFactory(Factory):
+    def __init__(self, tundev):
+        self.protocol = VPNProtocol
+        self.tundev = tundev
+
+    def buildProtocol(self, addr):
+        p = self.protocol()
+        p.factory = self
+        p.tundev = self.tundev
+        return p
+
+
 def main():
+    # TUN dev
     tunprotocol = TunProtocol()
-    tundesc = TunDevice(tunprotocol, reactor)
-    tundesc.ifconfig('192.168.10.3', '255.255.255.0')
-    tundesc.startReading()
-    vpnprotocol = VPNProtocol()
-    serverfactory = Factory()
-    serverfactory.protocol = vpnprotocol
+    tundev = TunDevice(tunprotocol, reactor)
+    tundev.ifconfig('192.168.10.3', '255.255.255.240')
+    tundev.startReading()
+    # tcp for client
+    serverfactory = VPNFactory(tundev)
     reactor.listenTCP(1234, serverfactory)  # @UndefinedVariable
+    # web console
+    # run
     reactor.run()  # @UndefinedVariable
 
 
