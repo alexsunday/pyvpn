@@ -35,7 +35,8 @@ def test_auth():
 
 
 def test_getip():
-    sock = auth('sunday', '12345678')
+    # sock = auth('sunday', '12345678')
+    sock = get_conn()
     body = chr(2)
     head = struct.pack('@H', len(body) + 2)
     sock.send(head + body)

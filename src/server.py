@@ -15,6 +15,8 @@ from twisted.protocols.policies import TimeoutMixin
 import struct
 from twisted.internet.protocol import Factory
 from util import is_valid_netmask, is_valid_ip, inet_atol
+import zlib
+
 logger = logging.getLogger("pyvpn")
 
 
@@ -39,6 +41,7 @@ class TunDevice(FileDescriptor, object):
         self.protocol = protocol
         self.protocol.dev, self.protocol.tun = self.dev, self.tunfd
         self.protocol.connectionMade()
+        self._write_buf = ''
 
     def get_free_addr(self):
         addr = self._netaddr
@@ -79,8 +82,25 @@ class TunDevice(FileDescriptor, object):
         fdesc.readFromFD(self.tunfd, self._doRead)
         print '~~~~~~~~~~~~~~~~~~~~~~~~~'
 
+    @staticmethod
+    def get_frame(buf):
+        if len(buf) <= 20:
+            return -1
+        pack_len = struct.unpack('!H', buf[2:4])[0]
+        logger.info('FRAME:[%d], BUF:[%d]' % (pack_len, len(buf)))
+        if len(buf) < pack_len:
+            return -1
+        return pack_len
+
     def writeSomeData(self, data):
-        fdesc.writeToFD(self.tunfd, data)
+        self._write_buf += data
+        while True:
+            length = self.get_frame(self._write_buf)
+            if length == -1:
+                break
+            frame = self._write_buf[:length]
+            self._write_buf = self._write_buf[length:]
+            fdesc.writeToFD(self.tunfd, frame)
 
     def connectionLost(self, reason):
         if self.tunfd >= 0:
@@ -99,7 +119,11 @@ class TunProtocol(protocol.Protocol):
         pass
 
     def dataReceived(self, data):
-        pass
+        '''
+        @summary: 操作系统发给虚拟网卡的数据包，拆出其目标地址，发给目标用户
+        //先群发。
+        :param data:
+        '''
 
 
 class VPNProtocol(protocol.Protocol, TimeoutMixin):
@@ -161,8 +185,10 @@ class VPNProtocol(protocol.Protocol, TimeoutMixin):
         retpack = struct.pack('@HbII', 11, 2, self._addr, self._netmask)
         self.transport.write(retpack)
 
-    def trans_data(self):
+    def trans_data(self, pack):
         assert self._is_authed
+        raw_data = zlib.decompress(pack[3:])
+        self.tundev.writeSomeData(raw_data)
 
     def dataReceived(self, data):
         self.setTimeout(None)
@@ -180,7 +206,7 @@ class VPNProtocol(protocol.Protocol, TimeoutMixin):
             elif pack_type == util.PackageType.IFCONFIG:
                 self.peer_ifconfig()
             elif pack_type == util.PackageType.DATA:
-                self.trans_data()
+                self.trans_data(pack)
 
 
 class VPNFactory(Factory):
