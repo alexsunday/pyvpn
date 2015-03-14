@@ -6,13 +6,8 @@ Created on 2015年3月7日
 '''
 import fcntl  # @UnresolvedImport
 import socket
-import select
-import os
 import logging
 import struct
-import time
-import sys
-import argparse
 logger = logging.getLogger('vpn')
 logger.addHandler(logging.StreamHandler())
 logger.setLevel(logging.DEBUG)
@@ -123,6 +118,74 @@ def enable_tcp_forward():
     with open('/proc/sys/net/ipv4/ip_forward', 'wb+') as f1:
         f1.seek(0)
         f1.write('1')
+
+
+def inet_ltoa(addr_long):
+    '''
+    @summary: 转换 整数 到字符串的IP地址
+    :param addr_long: 整数地址，可以直接被ping的地址
+    '''
+    return socket.inet_ntoa(struct.pack('!I', addr_long))
+
+
+def inet_atol(addr):
+    '''
+    @summary: 转换字符串IP地址到整数地址
+    :param addr: like '192.168.2.121'
+    '''
+    return struct.unpack('!I', socket.inet_aton(addr))[0]
+
+
+def is_valid_netmask(mask):
+    '''
+    @summary: 校验是否为有效 掩码地址
+    :param mask: 字符串类型的掩码地址如 255.255.255.128 => True
+    // 255.255.0.255 => False
+    '''
+    all_mask = [0xffffffff ^ (0xffffffff >> i) for i in range(32)]
+    return mask in [inet_ltoa(el) for el in all_mask]
+
+
+def is_valid_ip(ip):
+    """Returns true if the given string is a well-formed IP address.
+
+    Supports IPv4 and IPv6.
+    //取自 tornado
+    """
+    if not ip or '\x00' in ip:
+        # getaddrinfo resolves empty strings to localhost, and truncates
+        # on zero bytes.
+        return False
+    try:
+        res = socket.getaddrinfo(ip, 0, socket.AF_UNSPEC,
+                                 socket.SOCK_STREAM,
+                                 0, socket.AI_NUMERICHOST)
+        return bool(res)
+    except socket.gaierror as e:
+        if e.args[0] == socket.EAI_NONAME:
+            return False
+        raise
+    return True
+
+
+def addr_netaddr(addr, netmask):
+    '''
+    @summary: 获得某IP地址的网络地址，如 192.168.3.1, 255.255.255.0 => 192.168.3.0
+    :param addr: like '192.168.0.23'
+    :param netmask: like '255.255.255.0'
+    @return: 整形地址
+    '''
+    return inet_atol(addr) & inet_atol(netmask)
+
+
+def addr_boardcast(addr, netmask):
+    '''
+    @summary: 获得某IP的广播地址，192.168.3.123, 255.255.255.0 => 192.168.3.255
+    //网络地址是该子网的最小地址，广播地址是该子网的最大地址，中间除却网关地址后剩余可自由分配的其他地址
+    :param addr:
+    :param netmask:
+    '''
+    return inet_atol(netmask) ^ 0xffffffff | inet_atol(addr)
 
 
 class PackageType(object):

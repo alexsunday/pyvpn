@@ -13,6 +13,8 @@ import logging
 import util
 from twisted.protocols.policies import TimeoutMixin
 import struct
+from twisted.internet.protocol import Factory
+from src.util import is_valid_netmask, is_valid_ip, inet_atol
 logger = logging.getLogger("pyvpn")
 
 
@@ -26,8 +28,26 @@ class TunDevice(FileDescriptor, object):
         self.protocol.dev, self.protocol.tun = self.dev, self.tun
         self.protocol.connectionMade()
 
-    def ifconfig(self, ipaddr, netmask):
-        util.ifconfig(self.dev, ipaddr, netmask)
+    def get_free_addr(self):
+        while True:
+            addr = self._netaddr + 1
+            if addr == self._gwaddr:
+                continue
+            if addr >= self._boardcast:
+                return None
+            return addr
+
+    def ifconfig(self, gwaddr, netmask):
+        assert is_valid_ip(gwaddr)
+        assert is_valid_netmask(netmask)
+        self.gwaddr = gwaddr
+        self.netmask = netmask
+        self._netaddr = util.addr_netaddr(self.gwaddr, self.netmask)
+        self._boardcast = util.addr_boardcast(self.gwaddr, self.netmask)
+        self._gwaddr = inet_atol(self.gwaddr)
+        # 已分配地址，整形地址
+        self.allocated_addr = []
+        util.ifconfig(self.dev, gwaddr, netmask)
 
     def fileno(self):
         return self.tun
@@ -64,6 +84,9 @@ class TunProtocol(protocol.Protocol):
 
 
 class VPNProtocol(protocol.Protocol, TimeoutMixin):
+    def __init__(self, tundev):
+        self.tundev = tundev
+
     def connectionMade(self):
         self._is_authed = False
         self._is_gzip = True
@@ -112,7 +135,7 @@ class VPNProtocol(protocol.Protocol, TimeoutMixin):
         assert self._is_authed
 
     def trans_data(self):
-        pass
+        assert self._is_authed
 
     def dataReceived(self, data):
         self.setTimeout(None)
@@ -134,9 +157,14 @@ class VPNProtocol(protocol.Protocol, TimeoutMixin):
 
 
 def main():
-    tundesc = TunDevice(TunProtocol(), reactor)
+    tunprotocol = TunProtocol()
+    tundesc = TunDevice(tunprotocol, reactor)
     tundesc.ifconfig('192.168.10.3', '255.255.255.0')
     tundesc.startReading()
+    vpnprotocol = VPNProtocol()
+    serverfactory = Factory()
+    serverfactory.protocol = vpnprotocol
+    reactor.listenTCP(1234, serverfactory)  # @UndefinedVariable
     reactor.run()  # @UndefinedVariable
 
 
