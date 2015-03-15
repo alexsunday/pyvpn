@@ -3,6 +3,7 @@ encoding//src/client.py=utf-8
 encoding//src/server.py=utf-8
 encoding//src/test_client_protocol.py=utf-8
 encoding//src/util.py=utf-8
+encoding//src/webconsole.py=utf-8
 encoding/ddns=utf-8
 encoding/pyvpn.py=utf-8
 encoding/tuntest.py=utf-8
